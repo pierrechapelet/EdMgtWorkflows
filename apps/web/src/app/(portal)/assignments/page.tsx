@@ -103,6 +103,9 @@ export default function MyAssignmentsPage() {
           {data?.data.map((assignment) => {
             const statusCfg = STATUS_CONFIG[assignment.status];
             const overdue = isOverdue(assignment.deadline) && ['pending', 'in_progress'].includes(assignment.status);
+            const isFillStep = assignment.workflowStep?.stepType === 'fill';
+            const isReviewStep = assignment.workflowStep?.stepType !== undefined &&
+              ['review', 'approve', 'reject', 'forward'].includes(assignment.workflowStep.stepType);
             const canAct = ['pending', 'in_progress'].includes(assignment.status) &&
               assignment.campaign?.status === 'active';
 
@@ -163,18 +166,26 @@ export default function MyAssignmentsPage() {
                     )}
                   </div>
 
-                  {canAct && (
+                  {canAct && isFillStep && (
                     <Link
-                      href={`/portal/assignments/${assignment.id}/fill`}
+                      href={`/assignments/${assignment.id}/fill`}
                       className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                     >
                       {assignment.status === 'pending' ? 'Start' : 'Continue'}
                       {' '}→
                     </Link>
                   )}
-                  {assignment.status === 'submitted' && (
+                  {canAct && isReviewStep && (
                     <Link
-                      href={`/portal/assignments/${assignment.id}`}
+                      href={`/assignments/${assignment.id}/review`}
+                      className="shrink-0 rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
+                    >
+                      Review →
+                    </Link>
+                  )}
+                  {['submitted', 'approved', 'rejected'].includes(assignment.status) && (
+                    <Link
+                      href={`/assignments/${assignment.id}/review`}
                       className="shrink-0 rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
                     >
                       View

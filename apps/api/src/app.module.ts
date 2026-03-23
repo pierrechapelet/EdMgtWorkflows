@@ -12,6 +12,7 @@ import { FormsModule } from './forms/forms.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { SubmissionsModule } from './submissions/submissions.module';
+import { ApprovalsModule } from './approvals/approvals.module';
 
 @Module({
   imports: [
@@ -54,7 +55,9 @@ import { SubmissionsModule } from './submissions/submissions.module';
     // Phase 6: Submissions (fill, drafts, offline sync, signature, file upload)
     SubmissionsModule,
 
-    // Phase 7+: ApprovalsModule
+    // Phase 7: Approval chain + BullMQ escalation
+    ApprovalsModule,
+
     // Phase 8+: NotificationsModule
     // Phase 9+: GeoModule, ReportsModule
 

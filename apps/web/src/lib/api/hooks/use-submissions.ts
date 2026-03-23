@@ -130,6 +130,26 @@ export function useSubmitSubmission(assignmentId: string) {
   });
 }
 
+export function useSubmissionByAssignment(assignmentId: string | undefined) {
+  return useQuery({
+    queryKey: ['submission-by-assignment', assignmentId],
+    queryFn: async () => {
+      const res = await apiClient.get<{ data: SubmissionDef[] }>(
+        `/submissions/by-assignment/${assignmentId}`,
+      );
+      // Return the most recent submission (submitted > draft)
+      const list = res.data.data ?? [];
+      return (
+        list.find((s) => s.status === 'submitted') ??
+        list.find((s) => s.status === 'flagged') ??
+        list[0] ??
+        null
+      );
+    },
+    enabled: !!assignmentId,
+  });
+}
+
 export function useRequestUploadUrl() {
   return useMutation({
     mutationFn: (data: {
