@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { XeduModule } from './xedu/xedu.module';
 import { RolesModule } from './roles/roles.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { FormsModule } from './forms/forms.module';
 
 @Module({
   imports: [
@@ -38,7 +39,9 @@ import { PermissionsModule } from './permissions/permissions.module';
     RolesModule,
     PermissionsModule,
 
-    // Phase 3+: FormsModule
+    // Phase 3: Form builder
+    FormsModule,
+
     // Phase 4+: WorkflowsModule
     // Phase 5+: CampaignsModule, AssignmentsModule
     // Phase 6+: SubmissionsModule
