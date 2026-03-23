@@ -10,6 +10,7 @@ import { RolesModule } from './roles/roles.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { FormsModule } from './forms/forms.module';
 import { WorkflowsModule } from './workflows/workflows.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
 
 @Module({
   imports: [
@@ -46,8 +47,9 @@ import { WorkflowsModule } from './workflows/workflows.module';
     // Phase 4: Workflow designer
     WorkflowsModule,
 
-    // Phase 5+: CampaignsModule, AssignmentsModule
-    // Phase 5+: CampaignsModule, AssignmentsModule
+    // Phase 5: Campaigns + assignment resolution
+    CampaignsModule,
+
     // Phase 6+: SubmissionsModule
     // Phase 7+: ApprovalsModule
     // Phase 8+: NotificationsModule
