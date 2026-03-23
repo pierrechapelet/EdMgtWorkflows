@@ -5,6 +5,9 @@ import { BullModule } from '@nestjs/bull';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { XeduModule } from './xedu/xedu.module';
+import { RolesModule } from './roles/roles.module';
+import { PermissionsModule } from './permissions/permissions.module';
 
 @Module({
   imports: [
@@ -30,7 +33,11 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     UsersModule,
 
-    // Phase 2+: XeduModule, PermissionsModule
+    // Phase 2: Org graph + permissions
+    XeduModule,
+    RolesModule,
+    PermissionsModule,
+
     // Phase 3+: FormsModule
     // Phase 4+: WorkflowsModule
     // Phase 5+: CampaignsModule, AssignmentsModule
