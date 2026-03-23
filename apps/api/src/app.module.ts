@@ -11,6 +11,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { FormsModule } from './forms/forms.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { SubmissionsModule } from './submissions/submissions.module';
 
 @Module({
   imports: [
@@ -50,7 +51,9 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     // Phase 5: Campaigns + assignment resolution
     CampaignsModule,
 
-    // Phase 6+: SubmissionsModule
+    // Phase 6: Submissions (fill, drafts, offline sync, signature, file upload)
+    SubmissionsModule,
+
     // Phase 7+: ApprovalsModule
     // Phase 8+: NotificationsModule
     // Phase 9+: GeoModule, ReportsModule
