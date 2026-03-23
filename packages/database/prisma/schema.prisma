@@ -1,0 +1,678 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum NodeType {
+  ministry
+  region
+  district
+  school
+  office
+  unit
+}
+
+enum EdgeType {
+  hierarchical
+  peer
+  cross_functional
+}
+
+enum Lang {
+  en
+  ar
+  fr
+  es
+}
+
+enum ComponentType {
+  text
+  number
+  date
+  datetime
+  dropdown
+  multi_select
+  file_upload
+  signature
+  geo_coordinates
+  table
+  section
+  conditional_group
+}
+
+enum StepType {
+  fill
+  review
+  approve
+  reject
+  forward
+  notify
+  end
+}
+
+enum NodeRelType {
+  absolute
+  parent
+  ancestor
+  peer
+  custom
+}
+
+enum TriggerAction {
+  submit
+  approve
+  reject
+  forward
+  timeout
+}
+
+enum CampaignStatus {
+  draft
+  active
+  paused
+  recalled
+  closed
+}
+
+enum AssignmentStatus {
+  pending
+  in_progress
+  submitted
+  approved
+  rejected
+  forwarded
+  expired
+  flagged
+}
+
+enum SubmissionStatus {
+  draft
+  submitted
+  under_review
+  approved
+  rejected
+  flagged
+}
+
+enum ApprovalAction {
+  submit
+  approve
+  reject
+  forward
+  request_correction
+}
+
+enum CaptureMethod {
+  gps
+  map_selection
+}
+
+enum SyncStatus {
+  pending
+  processing
+  accepted
+  flagged
+  rejected
+}
+
+// ─── Xedu Graph ───────────────────────────────────────────────────────────────
+// True DAG: ministry → regions → districts → schools → offices/units
+// Edge types: hierarchical (permission inheritance), peer, cross_functional
+// Closure table: materialized for fast ancestor/descendant lookups (hierarchical only)
+
+model XeduNode {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique
+  nodeType  NodeType @map("node_type")
+  name      Json     // { en, ar, fr, es }
+  metadata  Json?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  fromEdges         XeduEdge[]                   @relation("EdgeFromNode")
+  toEdges           XeduEdge[]                   @relation("EdgeToNode")
+  ancestorEntries   XeduClosure[]                @relation("ClosureAncestor")
+  descendantEntries XeduClosure[]                @relation("ClosureDescendant")
+
+  userRoleAssignments     UserRoleAssignment[]
+  componentPermissions    ComponentPermission[]
+  ownedFormTemplates      FormTemplate[]
+  ownedWorkflows          WorkflowDefinition[]
+  ownedCampaigns          FormCampaign[]
+  campaignWorkflowTargets CampaignWorkflowAssignment[]
+  submissionAssignments   SubmissionsAssignment[]
+
+  // Workflow step assignee / escalation target (direct node reference)
+  workflowStepAssignees   WorkflowStep[] @relation("WorkflowStepAssigneeNode")
+  workflowStepEscalations WorkflowStep[] @relation("WorkflowStepEscalationNode")
+
+  @@map("xedu_nodes")
+}
+
+model XeduEdge {
+  id         String   @id @default(uuid()) @db.Uuid
+  fromNodeId String   @map("from_node_id") @db.Uuid
+  toNodeId   String   @map("to_node_id") @db.Uuid
+  edgeType   EdgeType @map("edge_type")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  fromNode XeduNode @relation("EdgeFromNode", fields: [fromNodeId], references: [id])
+  toNode   XeduNode @relation("EdgeToNode", fields: [toNodeId], references: [id])
+
+  @@unique([fromNodeId, toNodeId, edgeType])
+  @@index([fromNodeId])
+  @@index([toNodeId])
+  @@map("xedu_edges")
+}
+
+// Materialized closure table — rebuilt via trigger on xedu_edges insert/delete.
+// Only hierarchical edges contribute to the closure.
+// Used for: permission inheritance, subtree scoping of dashboards/reports.
+model XeduClosure {
+  ancestorId   String @map("ancestor_id") @db.Uuid
+  descendantId String @map("descendant_id") @db.Uuid
+  depth        Int
+
+  ancestor   XeduNode @relation("ClosureAncestor", fields: [ancestorId], references: [id], onDelete: Cascade)
+  descendant XeduNode @relation("ClosureDescendant", fields: [descendantId], references: [id], onDelete: Cascade)
+
+  @@id([ancestorId, descendantId])
+  @@index([descendantId])
+  @@map("xedu_closure")
+}
+
+// ─── Users & Roles ────────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique
+  phone         String?
+  passwordHash  String   @map("password_hash")
+  mfaSecret     String?  @map("mfa_secret")
+  mfaEnabled    Boolean  @default(false) @map("mfa_enabled")
+  preferredLang Lang     @default(en) @map("preferred_lang")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Role assignments where this user is the subject
+  roleAssignments    UserRoleAssignment[] @relation("AssignedUser")
+  // Role assignments this user has granted to others
+  grantedAssignments UserRoleAssignment[] @relation("AssignmentGrantor")
+
+  refreshTokens         RefreshToken[]
+  createdFormTemplates  FormTemplate[]
+  publishedFormVersions FormVersion[]
+  createdWorkflows      WorkflowDefinition[]
+  createdCampaigns      FormCampaign[]
+  submissionAssignments SubmissionsAssignment[]
+  submissions           Submission[]
+  approvalEvents        ApprovalEvent[]
+  auditLogs             AuditLog[]
+  syncQueues            SyncQueue[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique
+  name        Json     // { en, ar, fr, es }
+  description Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  userRoleAssignments  UserRoleAssignment[]
+  componentPermissions ComponentPermission[]
+
+  // Workflow steps where this role is the assignee or escalation target
+  workflowStepAssignees   WorkflowStep[] @relation("WorkflowStepAssigneeRole")
+  workflowStepEscalations WorkflowStep[] @relation("WorkflowStepEscalationRole")
+
+  @@map("roles")
+}
+
+model UserRoleAssignment {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  roleId      String    @map("role_id") @db.Uuid
+  xeduNodeId  String    @map("xedu_node_id") @db.Uuid
+  grantedById String    @map("granted_by") @db.Uuid
+  validFrom   DateTime  @default(now()) @map("valid_from")
+  validUntil  DateTime? @map("valid_until")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user      User     @relation("AssignedUser", fields: [userId], references: [id])
+  role      Role     @relation(fields: [roleId], references: [id])
+  xeduNode  XeduNode @relation(fields: [xeduNodeId], references: [id])
+  grantedBy User     @relation("AssignmentGrantor", fields: [grantedById], references: [id])
+
+  @@unique([userId, roleId, xeduNodeId])
+  @@index([userId])
+  @@index([xeduNodeId])
+  @@map("user_role_assignments")
+}
+
+// Rotating refresh tokens — only one active per session.
+// Revoked on use (rotation) or on explicit logout.
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash") // SHA-256 of the raw token
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+// Granular permissions: Role × XeduNode × FormTemplate × Component × WorkflowStep → Actions
+// Null fields act as wildcards (e.g., null component_id = applies to all components).
+// inherits_to_children: propagate down hierarchical edges.
+model ComponentPermission {
+  id                 String  @id @default(uuid()) @db.Uuid
+  roleId             String  @map("role_id") @db.Uuid
+  xeduNodeId         String? @map("xedu_node_id") @db.Uuid
+  formTemplateId     String? @map("form_template_id") @db.Uuid
+  componentId        String? @map("component_id") @db.Uuid
+  workflowStepId     String? @map("workflow_step_id") @db.Uuid
+  canRead            Boolean @default(false) @map("can_read")
+  canWrite           Boolean @default(false) @map("can_write")
+  canCreate          Boolean @default(false) @map("can_create")
+  canDelete          Boolean @default(false) @map("can_delete")
+  canApprove         Boolean @default(false) @map("can_approve")
+  canReject          Boolean @default(false) @map("can_reject")
+  canForward         Boolean @default(false) @map("can_forward")
+  inheritsToChildren Boolean @default(true) @map("inherits_to_children")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  role         Role           @relation(fields: [roleId], references: [id])
+  xeduNode     XeduNode?      @relation(fields: [xeduNodeId], references: [id])
+  formTemplate FormTemplate?  @relation(fields: [formTemplateId], references: [id])
+  component    FormComponent? @relation(fields: [componentId], references: [id])
+  workflowStep WorkflowStep?  @relation(fields: [workflowStepId], references: [id])
+
+  @@index([roleId])
+  @@index([xeduNodeId])
+  @@index([formTemplateId])
+  @@map("component_permissions")
+}
+
+// ─── Forms & Versioning ───────────────────────────────────────────────────────
+// Versioning rule:
+//   - Open assignments on older versions remain on that version.
+//   - New assignments always use form_campaigns.form_version_id (latest published).
+//   - submission_values reference the component_id from the version used at fill time.
+
+model FormTemplate {
+  id               String   @id @default(uuid()) @db.Uuid
+  code             String   @unique
+  title            Json     // { en, ar, fr, es }
+  description      Json?
+  createdById      String   @map("created_by") @db.Uuid
+  ownerNodeId      String   @map("owner_node_id") @db.Uuid
+  currentVersionId String?  @unique @map("current_version_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  createdBy      User              @relation(fields: [createdById], references: [id])
+  ownerNode      XeduNode          @relation(fields: [ownerNodeId], references: [id])
+  currentVersion FormVersion?      @relation("CurrentVersion", fields: [currentVersionId], references: [id])
+  versions       FormVersion[]     @relation("TemplateVersions")
+  campaigns      FormCampaign[]
+  permissions    ComponentPermission[]
+
+  @@index([ownerNodeId])
+  @@map("form_templates")
+}
+
+model FormVersion {
+  id            String    @id @default(uuid()) @db.Uuid
+  templateId    String    @map("template_id") @db.Uuid
+  versionNumber Int       @map("version_number")
+  schema        Json      // Full form structure snapshot (validated against form-schema package)
+  changelog     String?
+  isPublished   Boolean   @default(false) @map("is_published")
+  publishedAt   DateTime? @map("published_at")
+  publishedById String?   @map("published_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  template    FormTemplate  @relation("TemplateVersions", fields: [templateId], references: [id])
+  publishedBy User?         @relation(fields: [publishedById], references: [id])
+  components  FormComponent[]
+  campaigns   FormCampaign[]
+  submissions Submission[]
+
+  // Back-reference: which template uses this as the current version
+  currentForTemplate FormTemplate? @relation("CurrentVersion")
+
+  @@unique([templateId, versionNumber])
+  @@index([templateId])
+  @@map("form_versions")
+}
+
+model FormComponent {
+  id            String        @id @default(uuid()) @db.Uuid
+  versionId     String        @map("version_id") @db.Uuid
+  parentId      String?       @map("parent_id") @db.Uuid // for sections / conditional_groups
+  orderIndex    Int           @map("order_index")
+  componentType ComponentType @map("component_type")
+  key           String        // internal field key, unique within a version
+  label         Json          // { en, ar, fr, es }
+  placeholder   Json?
+  helpText      Json?         @map("help_text")
+  validation    Json?         // { required, min, max, minLength, maxLength, pattern, accept, maxSize }
+  options       Json?         // dropdown/multi_select: [{ value, label:{ en,ar,fr,es } }]
+  tableSchema   Json?         @map("table_schema")
+  // table_schema shape:
+  // { allow_add_rows: bool, max_rows: int, columns: [{ key, label:{...}, type, required, options? }] }
+  conditions    Json?         // conditional display rules
+  isRequired    Boolean       @default(false) @map("is_required")
+  metadata      Json?
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  version          FormVersion         @relation(fields: [versionId], references: [id])
+  parent           FormComponent?      @relation("ComponentChildren", fields: [parentId], references: [id])
+  children         FormComponent[]     @relation("ComponentChildren")
+  permissions      ComponentPermission[]
+  submissionValues SubmissionValue[]
+  geoPoints        SubmissionGeoPoint[]
+
+  @@index([versionId])
+  @@map("form_components")
+}
+
+// ─── Workflows ────────────────────────────────────────────────────────────────
+// District/form owners can create and publish workflow definitions.
+// One campaign can use different workflows per target Xedu region.
+
+model WorkflowDefinition {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        Json     // { en, ar, fr, es }
+  description Json?
+  ownerNodeId String   @map("owner_node_id") @db.Uuid
+  createdById String   @map("created_by") @db.Uuid
+  isPublished Boolean  @default(false) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  ownerNode           XeduNode                     @relation(fields: [ownerNodeId], references: [id])
+  createdBy           User                         @relation(fields: [createdById], references: [id])
+  steps               WorkflowStep[]
+  campaignAssignments CampaignWorkflowAssignment[]
+
+  @@index([ownerNodeId])
+  @@map("workflow_definitions")
+}
+
+model WorkflowStep {
+  id                  String       @id @default(uuid()) @db.Uuid
+  workflowId          String       @map("workflow_id") @db.Uuid
+  name                Json         // { en, ar, fr, es }
+  stepType            StepType     @map("step_type")
+  // Assignee: resolved at campaign deployment time from xedu_closure + role
+  assigneeRoleId      String?      @map("assignee_role_id") @db.Uuid
+  assigneeNodeId      String?      @map("assignee_node_id") @db.Uuid
+  assigneeNodeRel     NodeRelType? @map("assignee_node_rel")
+  deadlineOffsetHours Int?         @map("deadline_offset_hours") // relative to step activation
+  // Escalation: creates new assignment + notification on timeout
+  escalationStepId    String?      @map("escalation_step_id") @db.Uuid
+  escalationRoleId    String?      @map("escalation_role_id") @db.Uuid
+  escalationNodeRel   NodeRelType? @map("escalation_node_rel")
+  escalationNodeId    String?      @map("escalation_node_id") @db.Uuid
+  orderIndex          Int          @map("order_index")
+  metadata            Json?
+  createdAt           DateTime     @default(now()) @map("created_at")
+
+  workflow       WorkflowDefinition  @relation(fields: [workflowId], references: [id])
+  assigneeRole   Role?               @relation("WorkflowStepAssigneeRole", fields: [assigneeRoleId], references: [id])
+  assigneeNode   XeduNode?           @relation("WorkflowStepAssigneeNode", fields: [assigneeNodeId], references: [id])
+  escalationStep WorkflowStep?       @relation("EscalationTarget", fields: [escalationStepId], references: [id])
+  escalatedFrom  WorkflowStep[]      @relation("EscalationTarget")
+  escalationRole Role?               @relation("WorkflowStepEscalationRole", fields: [escalationRoleId], references: [id])
+  escalationNode XeduNode?           @relation("WorkflowStepEscalationNode", fields: [escalationNodeId], references: [id])
+
+  fromTransitions       WorkflowTransition[]    @relation("TransitionFromStep")
+  toTransitions         WorkflowTransition[]    @relation("TransitionToStep")
+  submissionAssignments SubmissionsAssignment[]
+  approvalEvents        ApprovalEvent[]
+  permissions           ComponentPermission[]
+
+  @@index([workflowId])
+  @@map("workflow_steps")
+}
+
+model WorkflowTransition {
+  id            String        @id @default(uuid()) @db.Uuid
+  fromStepId    String        @map("from_step_id") @db.Uuid
+  toStepId      String        @map("to_step_id") @db.Uuid
+  triggerAction TriggerAction @map("trigger_action")
+  conditions    Json?         // optional guard conditions
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  fromStep WorkflowStep @relation("TransitionFromStep", fields: [fromStepId], references: [id])
+  toStep   WorkflowStep @relation("TransitionToStep", fields: [toStepId], references: [id])
+
+  @@index([fromStepId])
+  @@map("workflow_transitions")
+}
+
+// ─── Campaigns & Assignments ──────────────────────────────────────────────────
+
+model FormCampaign {
+  id             String         @id @default(uuid()) @db.Uuid
+  formTemplateId String         @map("form_template_id") @db.Uuid
+  formVersionId  String         @map("form_version_id") @db.Uuid
+  title          Json           // { en, ar, fr, es }
+  description    Json?
+  createdById    String         @map("created_by") @db.Uuid
+  ownerNodeId    String         @map("owner_node_id") @db.Uuid
+  status         CampaignStatus @default(draft)
+  globalDeadline DateTime?      @map("global_deadline")
+  publishedAt    DateTime?      @map("published_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  formTemplate          FormTemplate                 @relation(fields: [formTemplateId], references: [id])
+  formVersion           FormVersion                  @relation(fields: [formVersionId], references: [id])
+  createdBy             User                         @relation(fields: [createdById], references: [id])
+  ownerNode             XeduNode                     @relation(fields: [ownerNodeId], references: [id])
+  workflowAssignments   CampaignWorkflowAssignment[]
+  submissionAssignments SubmissionsAssignment[]
+
+  @@index([ownerNodeId, status])
+  @@map("form_campaigns")
+}
+
+// One campaign can use a different workflow per target Xedu region.
+model CampaignWorkflowAssignment {
+  id               String    @id @default(uuid()) @db.Uuid
+  campaignId       String    @map("campaign_id") @db.Uuid
+  targetNodeId     String    @map("target_node_id") @db.Uuid
+  workflowId       String    @map("workflow_id") @db.Uuid
+  deadlineOverride DateTime? @map("deadline_override")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  campaign   FormCampaign       @relation(fields: [campaignId], references: [id])
+  targetNode XeduNode           @relation(fields: [targetNodeId], references: [id])
+  workflow   WorkflowDefinition @relation(fields: [workflowId], references: [id])
+
+  @@unique([campaignId, targetNodeId])
+  @@map("campaign_workflow_assignments")
+}
+
+model SubmissionsAssignment {
+  id             String           @id @default(uuid()) @db.Uuid
+  campaignId     String           @map("campaign_id") @db.Uuid
+  workflowStepId String           @map("workflow_step_id") @db.Uuid
+  assignedTo     String           @map("assigned_to") @db.Uuid
+  assignedNodeId String           @map("assigned_node_id") @db.Uuid
+  status         AssignmentStatus @default(pending)
+  deadline       DateTime?
+  notifiedAt     DateTime?        @map("notified_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  campaign       FormCampaign @relation(fields: [campaignId], references: [id])
+  workflowStep   WorkflowStep @relation(fields: [workflowStepId], references: [id])
+  assignee       User         @relation(fields: [assignedTo], references: [id])
+  assignedNode   XeduNode     @relation(fields: [assignedNodeId], references: [id])
+  submissions    Submission[]
+  approvalEvents ApprovalEvent[]
+
+  @@index([assignedTo, status])
+  @@index([campaignId])
+  @@map("submissions_assignments")
+}
+
+// ─── Submissions ──────────────────────────────────────────────────────────────
+// Submissions are immutable after submission (no post-submission editing).
+// Offline submissions: flagged if campaign recalled or deadline passed during offline period.
+
+model Submission {
+  id             String           @id @default(uuid()) @db.Uuid
+  assignmentId   String           @map("assignment_id") @db.Uuid
+  formVersionId  String           @map("form_version_id") @db.Uuid
+  submittedById  String           @map("submitted_by") @db.Uuid
+  status         SubmissionStatus @default(draft)
+  offlineFlag    Boolean          @default(false) @map("offline_flag")
+  conflictReason String?          @map("conflict_reason")
+  // Cryptographic binding: SHA-256 of deterministic submission JSON + signature image bytes
+  signatureHash  String?          @map("signature_hash")
+  submittedAt    DateTime?        @map("submitted_at")
+  lastSavedAt    DateTime?        @map("last_saved_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  assignment     SubmissionsAssignment @relation(fields: [assignmentId], references: [id])
+  formVersion    FormVersion           @relation(fields: [formVersionId], references: [id])
+  submittedBy    User                  @relation(fields: [submittedById], references: [id])
+  values         SubmissionValue[]
+  geoPoints      SubmissionGeoPoint[]
+  approvalEvents ApprovalEvent[]
+
+  @@index([assignmentId])
+  @@index([submittedById, status])
+  @@map("submissions")
+}
+
+model SubmissionValue {
+  id           String    @id @default(uuid()) @db.Uuid
+  submissionId String    @map("submission_id") @db.Uuid
+  componentId  String    @map("component_id") @db.Uuid
+  valueText    String?   @map("value_text")
+  valueNumber  Decimal?  @map("value_number")
+  valueDate    DateTime? @map("value_date")
+  valueJson    Json?     @map("value_json") // tables, multi-select, signature metadata, etc.
+  valueFileKey String?   @map("value_file_key") // S3 key: {entity}/{uuid}/{timestamp}-{filename}
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  submission Submission    @relation(fields: [submissionId], references: [id])
+  component  FormComponent @relation(fields: [componentId], references: [id])
+
+  @@index([submissionId])
+  @@map("submission_values")
+}
+
+// Geo points stored separately for PostGIS indexing and map dashboard queries.
+// Also mirrored in submission_values.value_json for portability.
+// NOTE: 'location' uses Unsupported("geometry(Point, 4326)") — interact via raw SQL.
+model SubmissionGeoPoint {
+  id             String        @id @default(uuid()) @db.Uuid
+  submissionId   String        @map("submission_id") @db.Uuid
+  componentId    String        @map("component_id") @db.Uuid
+  // PostGIS geometry — managed via raw SQL migrations, not Prisma-generated DDL.
+  location       Unsupported("geometry(Point, 4326)")
+  accuracyMeters Decimal?      @map("accuracy_meters")
+  captureMethod  CaptureMethod @map("capture_method")
+  capturedAt     DateTime      @map("captured_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  submission Submission    @relation(fields: [submissionId], references: [id])
+  component  FormComponent @relation(fields: [componentId], references: [id])
+
+  @@index([submissionId])
+  @@map("submission_geo_points")
+}
+
+// ─── Approvals & Audit ────────────────────────────────────────────────────────
+
+model ApprovalEvent {
+  id             String         @id @default(uuid()) @db.Uuid
+  submissionId   String         @map("submission_id") @db.Uuid
+  assignmentId   String         @map("assignment_id") @db.Uuid
+  workflowStepId String         @map("workflow_step_id") @db.Uuid
+  actorId        String         @map("actor_id") @db.Uuid
+  action         ApprovalAction
+  comment        String?
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  submission   Submission            @relation(fields: [submissionId], references: [id])
+  assignment   SubmissionsAssignment @relation(fields: [assignmentId], references: [id])
+  workflowStep WorkflowStep          @relation(fields: [workflowStepId], references: [id])
+  actor        User                  @relation(fields: [actorId], references: [id])
+
+  @@index([submissionId])
+  @@map("approval_events")
+}
+
+// Immutable audit log — append-only, no UPDATE or DELETE ever runs.
+// AuditInterceptor writes fire-and-forget via BullMQ (non-blocking).
+// IMPORTANT: In production this table is RANGE-partitioned by created_at (by year).
+// Partitioning is managed via raw SQL in migrations — Prisma model is schema-only.
+// Retention: 5 years total. pg_cron archives partitions > 1 year to S3, drops after 5 years.
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  entityType  String   @map("entity_type") // "submission" | "user" | "campaign" | ...
+  entityId    String   @map("entity_id") @db.Uuid
+  actorId     String?  @map("actor_id") @db.Uuid
+  actorNodeId String?  @map("actor_node_id") @db.Uuid
+  action      String
+  beforeState Json?    @map("before_state")
+  afterState  Json?    @map("after_state")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor AuditLog? @ignore // No FK — audit log must never be blocked by user deletion
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_log")
+}
+
+// Offline submission sync queue.
+// Conflict resolution: if campaign recalled or deadline passed → status = flagged.
+// Flagged items are routed to manual review queue.
+model SyncQueue {
+  id                String     @id @default(uuid()) @db.Uuid
+  deviceId          String     @map("device_id")
+  userId            String     @map("user_id") @db.Uuid
+  localSubmissionId String?    @map("local_submission_id") // client-generated UUID
+  payload           Json
+  status            SyncStatus @default(pending)
+  conflictDetails   Json?      @map("conflict_details")
+  receivedAt        DateTime   @default(now()) @map("received_at")
+  processedAt       DateTime?  @map("processed_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([status])
+  @@map("sync_queue")
+}

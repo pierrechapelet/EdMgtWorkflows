@@ -1,0 +1,36 @@
+{
+  "auth": {
+    "login": {
+      "title": "EdMgtWorkflows",
+      "subtitle": "Connectez-vous à votre compte",
+      "email": "Adresse e-mail",
+      "password": "Mot de passe",
+      "submit": "Se connecter",
+      "submitting": "Connexion en cours…",
+      "mfa_title": "Authentification à deux facteurs",
+      "mfa_subtitle": "Entrez le code à 6 chiffres de votre application d'authentification",
+      "mfa_code": "Code de vérification",
+      "mfa_submit": "Vérifier",
+      "mfa_back": "Retour à la connexion",
+      "errors": {
+        "invalid_credentials": "Adresse e-mail ou mot de passe invalide",
+        "invalid_mfa_code": "Code de vérification invalide",
+        "email_required": "L'adresse e-mail est requise",
+        "password_required": "Le mot de passe est requis"
+      }
+    }
+  },
+  "portal": {
+    "title": "Mes assignations",
+    "no_assignments": "Aucune assignation active"
+  },
+  "common": {
+    "loading": "Chargement…",
+    "error": "Une erreur s'est produite",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "confirm": "Confirmer",
+    "back": "Retour"
+  }
+}
