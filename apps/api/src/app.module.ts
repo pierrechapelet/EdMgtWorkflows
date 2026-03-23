@@ -9,6 +9,7 @@ import { XeduModule } from './xedu/xedu.module';
 import { RolesModule } from './roles/roles.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { FormsModule } from './forms/forms.module';
+import { WorkflowsModule } from './workflows/workflows.module';
 
 @Module({
   imports: [
@@ -42,12 +43,16 @@ import { FormsModule } from './forms/forms.module';
     // Phase 3: Form builder
     FormsModule,
 
-    // Phase 4+: WorkflowsModule
+    // Phase 4: Workflow designer
+    WorkflowsModule,
+
+    // Phase 5+: CampaignsModule, AssignmentsModule
     // Phase 5+: CampaignsModule, AssignmentsModule
     // Phase 6+: SubmissionsModule
     // Phase 7+: ApprovalsModule
     // Phase 8+: NotificationsModule
     // Phase 9+: GeoModule, ReportsModule
+
   ],
 })
 export class AppModule {}
