@@ -13,6 +13,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { SubmissionsModule } from './submissions/submissions.module';
 import { ApprovalsModule } from './approvals/approvals.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -58,9 +59,10 @@ import { ApprovalsModule } from './approvals/approvals.module';
     // Phase 7: Approval chain + BullMQ escalation
     ApprovalsModule,
 
-    // Phase 8+: NotificationsModule
-    // Phase 9+: GeoModule, ReportsModule
+    // Phase 8: In-app notifications + email (SES)
+    NotificationsModule,
 
+    // Phase 9+: GeoModule, ReportsModule (placeholder)
   ],
 })
 export class AppModule {}

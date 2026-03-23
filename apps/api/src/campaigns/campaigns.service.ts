@@ -10,6 +10,7 @@ import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { CampaignQueryDto } from './dto/campaign-query.dto';
 import { AssignWorkflowDto } from './dto/assign-workflow.dto';
 import { AssignmentsService } from './assignments.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
@@ -17,6 +18,7 @@ export class CampaignsService {
   constructor(
     private readonly prisma: DatabaseService,
     private readonly assignmentsService: AssignmentsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ── Campaigns ──────────────────────────────────────────────────────────────
@@ -185,13 +187,38 @@ export class CampaignsService {
       throw new BadRequestException('Only active or paused campaigns can be recalled');
     }
 
+    // Collect affected users before flagging
+    const affected = await this.prisma.submissionsAssignment.findMany({
+      where: { campaignId: id, status: { in: ['pending', 'in_progress'] } },
+      select: { assignedTo: true },
+    });
+    const affectedUserIds = [...new Set(affected.map((a) => a.assignedTo))];
+
     // Mark all pending/in_progress assignments as flagged
     await this.prisma.submissionsAssignment.updateMany({
       where: { campaignId: id, status: { in: ['pending', 'in_progress'] } },
       data: { status: 'flagged' },
     });
 
-    return this.prisma.formCampaign.update({ where: { id }, data: { status: 'recalled' } });
+    const recalled = await this.prisma.formCampaign.update({
+      where: { id },
+      data: { status: 'recalled' },
+    });
+
+    // Notify all affected users
+    if (affectedUserIds.length > 0) {
+      const campaignTitle = (campaign.title as Record<string, string>).en ?? 'Campaign';
+      void this.notificationsService.notifyMany(affectedUserIds, {
+        type: 'campaign_recalled',
+        title: `Campaign recalled: ${campaignTitle}`,
+        body: `The campaign "${campaignTitle}" has been recalled. No further action is required.`,
+        entityType: 'campaign',
+        entityId: id,
+        sendEmail: true,
+      });
+    }
+
+    return recalled;
   }
 
   async close(id: string) {

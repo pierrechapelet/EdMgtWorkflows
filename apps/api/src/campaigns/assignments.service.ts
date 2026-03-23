@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { AssignmentQueryDto } from './dto/assignment-query.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AssignmentsService {
-  constructor(private readonly prisma: DatabaseService) {}
+  constructor(
+    private readonly prisma: DatabaseService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   // ── Query ──────────────────────────────────────────────────────────────────
 
@@ -223,7 +227,49 @@ export class AssignmentsService {
       totalCreated += result.count;
     }
 
+    // Notify all newly-created (unnotified) assignments for this campaign
+    if (totalCreated > 0) {
+      void this.notifyUnnotified(campaignId);
+    }
+
     return totalCreated;
+  }
+
+  /**
+   * Queries unnotified assignments for a campaign and sends assignment_created notifications.
+   * Stamps notifiedAt to prevent repeat sends.
+   */
+  private async notifyUnnotified(campaignId: string): Promise<void> {
+    const unnotified = await this.prisma.submissionsAssignment.findMany({
+      where: { campaignId, notifiedAt: null },
+      include: {
+        campaign: { select: { title: true } },
+      },
+    });
+
+    if (unnotified.length === 0) return;
+
+    const now = new Date();
+
+    // Group by campaign title (all same campaign here, but keep it generic)
+    const campaignTitle =
+      (unnotified[0].campaign.title as Record<string, string>).en ?? 'Campaign';
+
+    const userIds = [...new Set(unnotified.map((a) => a.assignedTo))];
+
+    void this.notificationsService.notifyMany(userIds, {
+      type: 'assignment_created',
+      title: `New assignment: ${campaignTitle}`,
+      body: `You have been assigned to fill out a form for the campaign "${campaignTitle}".`,
+      entityType: 'campaign',
+      entityId: campaignId,
+      sendEmail: true,
+    });
+
+    await this.prisma.submissionsAssignment.updateMany({
+      where: { id: { in: unnotified.map((a) => a.id) } },
+      data: { notifiedAt: now },
+    });
   }
 
   /**
@@ -269,9 +315,29 @@ export class AssignmentsService {
           assignedNodeId: targetNodeId,
           status: 'pending',
           deadline,
+          notifiedAt: new Date(), // stamp immediately; notification sent below
         },
       }),
     ]);
+
+    // Notify the new assignee about the incoming submission
+    const campaign = await this.prisma.formCampaign.findUnique({
+      where: { id: current.campaignId },
+      select: { title: true },
+    });
+    const campaignTitle = campaign
+      ? ((campaign.title as Record<string, string>).en ?? 'Campaign')
+      : 'Campaign';
+
+    void this.notificationsService.notify({
+      userId: targetUserId,
+      type: 'submission_received',
+      title: `New submission to review: ${campaignTitle}`,
+      body: `A submission is awaiting your review for the campaign "${campaignTitle}".`,
+      entityType: 'assignment',
+      entityId: nextAssignment.id,
+      sendEmail: true,
+    });
 
     return nextAssignment;
   }

@@ -9,12 +9,13 @@ import {
   ESCALATION_QUEUE,
 } from './escalation.service';
 import { CampaignsModule } from '../campaigns/campaigns.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: ESCALATION_QUEUE }),
-    // Import CampaignsModule to access AssignmentsService
     CampaignsModule,
+    NotificationsModule,
   ],
   controllers: [ApprovalsController],
   providers: [

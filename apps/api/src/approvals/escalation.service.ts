@@ -3,6 +3,7 @@ import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { DatabaseService } from '../database/database.service';
 import { AssignmentsService } from '../campaigns/assignments.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export const ESCALATION_QUEUE = 'escalation';
 export const ESCALATION_JOB = 'check-escalations';
@@ -91,6 +92,7 @@ export class EscalationService {
   constructor(
     private readonly prisma: DatabaseService,
     private readonly assignmentsService: AssignmentsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async processEscalations(): Promise<number> {
@@ -105,6 +107,7 @@ export class EscalationService {
         },
       },
       include: {
+        campaign: { select: { title: true } },
         workflowStep: {
           select: {
             escalationStepId: true,
@@ -158,7 +161,7 @@ export class EscalationService {
           ? new Date(now.getTime() + escalationDeadlineHours * 3_600_000)
           : null;
 
-        await this.prisma.$transaction([
+        const [, escalationAssignment] = await this.prisma.$transaction([
           this.prisma.submissionsAssignment.update({
             where: { id: assignment.id },
             data: { status: 'expired' },
@@ -171,9 +174,23 @@ export class EscalationService {
               assignedNodeId: escalationNodeId,
               status: 'pending',
               deadline: escalationDeadline,
+              notifiedAt: now, // pre-stamp; we notify below
             },
           }),
         ]);
+
+        // Notify escalation target
+        const campaignTitle =
+          (assignment.campaign?.title as Record<string, string> | undefined)?.en ?? 'Campaign';
+        void this.notificationsService.notify({
+          userId: targetUserId,
+          type: 'escalation_created',
+          title: `Escalated assignment: ${campaignTitle}`,
+          body: `An overdue assignment for "${campaignTitle}" has been escalated to you.`,
+          entityType: 'assignment',
+          entityId: escalationAssignment.id,
+          sendEmail: true,
+        });
 
         escalated++;
       } catch (err: unknown) {

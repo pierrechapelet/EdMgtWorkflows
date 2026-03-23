@@ -121,6 +121,17 @@ enum SyncStatus {
   rejected
 }
 
+enum NotificationType {
+  assignment_created
+  deadline_approaching
+  deadline_passed
+  submission_received
+  approved
+  rejected
+  campaign_recalled
+  escalation_created
+}
+
 // ─── Xedu Graph ───────────────────────────────────────────────────────────────
 // True DAG: ministry → regions → districts → schools → offices/units
 // Edge types: hierarchical (permission inheritance), peer, cross_functional
@@ -218,6 +229,7 @@ model User {
   approvalEvents        ApprovalEvent[]
   auditLogs             AuditLog[]
   syncQueues            SyncQueue[]
+  notifications         Notification[]
 
   @@map("users")
 }
@@ -675,4 +687,28 @@ model SyncQueue {
   @@index([userId, status])
   @@index([status])
   @@map("sync_queue")
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+// In-app notifications + email dispatch tracking.
+// Email jobs are enqueued via BullMQ; this table stores in-app state only.
+
+model Notification {
+  id         String           @id @default(uuid()) @db.Uuid
+  userId     String           @map("user_id") @db.Uuid
+  type       NotificationType
+  title      String
+  body       String
+  entityType String?          @map("entity_type") // "assignment" | "submission" | "campaign"
+  entityId   String?          @map("entity_id")   @db.Uuid
+  isRead     Boolean          @default(false) @map("is_read")
+  readAt     DateTime?        @map("read_at")
+  emailSent  Boolean          @default(false) @map("email_sent")
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
 }

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { AssignmentsService } from '../campaigns/assignments.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { TakeActionDto, ApprovalActionEnum } from './dto/take-action.dto';
 
 // Map approval actions → workflow trigger actions used in transitions
@@ -21,6 +22,7 @@ export class ApprovalsService {
   constructor(
     private readonly prisma: DatabaseService,
     private readonly assignmentsService: AssignmentsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ── Take action ────────────────────────────────────────────────────────────
@@ -52,6 +54,7 @@ export class ApprovalsService {
         campaign: {
           select: {
             status: true,
+            title: true,
           },
         },
       },
@@ -114,6 +117,46 @@ export class ApprovalsService {
       // No outgoing transition — terminal action
       await this.markTerminal(assignmentId, dto.action, submission.id);
     }
+
+    // ── Notifications ────────────────────────────────────────────────────────
+    const campaignTitle =
+      (assignment.campaign?.title as Record<string, string> | undefined)?.en ?? 'Campaign';
+
+    // Notify the submitter of the final outcome (approved / rejected)
+    const isApprove = dto.action === ApprovalActionEnum.Approve;
+    const isReject =
+      dto.action === ApprovalActionEnum.Reject ||
+      dto.action === ApprovalActionEnum.RequestCorrection;
+
+    if (!nextAssignmentId) {
+      // Terminal action — notify original submitter
+      if (isApprove) {
+        void this.notificationsService.notify({
+          userId: submission.submittedById,
+          type: 'approved',
+          title: `Submission approved: ${campaignTitle}`,
+          body: `Your submission for "${campaignTitle}" has been approved.`,
+          entityType: 'submission',
+          entityId: submission.id,
+          sendEmail: true,
+        });
+      } else if (isReject) {
+        void this.notificationsService.notify({
+          userId: submission.submittedById,
+          type: 'rejected',
+          title: `Submission rejected: ${campaignTitle}`,
+          body:
+            dto.action === ApprovalActionEnum.RequestCorrection
+              ? `Your submission for "${campaignTitle}" requires correction.`
+              : `Your submission for "${campaignTitle}" has been rejected.`,
+          entityType: 'submission',
+          entityId: submission.id,
+          sendEmail: true,
+        });
+      }
+    }
+    // Note: submission_received notification for the next step is sent by advanceToNextStep
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Record approval event
     const event = await this.prisma.approvalEvent.create({
