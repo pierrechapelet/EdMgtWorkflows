@@ -16,6 +16,7 @@ import {
 } from '@/lib/api/hooks/use-campaigns';
 import { useXeduNodes } from '@/lib/api/hooks/use-xedu';
 import { useWorkflows } from '@/lib/api/hooks/use-workflows';
+import { useExportDownload, useEnqueuePdf, usePdfJobStatus } from '@/lib/api/hooks/use-reports';
 
 const STATUS_BADGE: Record<CampaignStatus, { label: string; classes: string }> = {
   draft: { label: 'Draft', classes: 'bg-gray-100 text-gray-700' },
@@ -35,6 +36,93 @@ const ASSIGNMENT_STATUS_BADGE: Record<AssignmentStatus, string> = {
   expired: 'bg-slate-100 text-slate-500',
   flagged: 'bg-yellow-100 text-yellow-700',
 };
+
+// ── Export panel ───────────────────────────────────────────────────────────────
+
+function ExportPanel({ campaignId }: { campaignId: string }) {
+  const { download } = useExportDownload();
+  const enqueuePdf = useEnqueuePdf(campaignId);
+  const [pdfJobId, setPdfJobId] = useState<string | null>(null);
+  const { data: pdfJob } = usePdfJobStatus(campaignId, pdfJobId);
+  const [downloading, setDownloading] = useState<'csv' | 'xlsx' | null>(null);
+
+  async function handleDownload(format: 'csv' | 'xlsx') {
+    setDownloading(format);
+    try {
+      await download(campaignId, format);
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  async function handlePdf() {
+    const result = await enqueuePdf.mutateAsync();
+    setPdfJobId(result.jobId);
+  }
+
+  return (
+    <div className="rounded-lg border bg-card p-5 space-y-3">
+      <h2 className="text-sm font-semibold">Export submissions</h2>
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => void handleDownload('csv')}
+          disabled={downloading === 'csv'}
+          className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+        >
+          {downloading === 'csv' ? 'Downloading…' : 'CSV'}
+        </button>
+        <button
+          onClick={() => void handleDownload('xlsx')}
+          disabled={downloading === 'xlsx'}
+          className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+        >
+          {downloading === 'xlsx' ? 'Downloading…' : 'XLSX'}
+        </button>
+        <button
+          onClick={() => void handlePdf()}
+          disabled={enqueuePdf.isPending}
+          className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+        >
+          {enqueuePdf.isPending ? 'Queuing…' : 'PDF (async)'}
+        </button>
+      </div>
+
+      {pdfJob && (
+        <div className="text-xs text-muted-foreground space-y-1">
+          <p>
+            PDF status:{' '}
+            <span
+              className={
+                pdfJob.status === 'completed'
+                  ? 'text-green-600 font-medium'
+                  : pdfJob.status === 'failed'
+                    ? 'text-red-600 font-medium'
+                    : 'text-blue-600'
+              }
+            >
+              {pdfJob.status}
+            </span>
+          </p>
+          {pdfJob.downloadUrl && (
+            <a
+              href={pdfJob.downloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary hover:underline"
+            >
+              Download PDF
+            </a>
+          )}
+          {pdfJob.failedReason && (
+            <p className="text-destructive">{pdfJob.failedReason}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -96,10 +184,26 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   return (
     <div className="p-8 space-y-6">
       {/* Breadcrumb */}
-      <div className="text-xs text-muted-foreground">
-        <Link href="/admin/campaigns" className="hover:underline">Campaigns</Link>
-        {' / '}
-        <span>{titleEn}</span>
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          <Link href="/admin/campaigns" className="hover:underline">Campaigns</Link>
+          {' / '}
+          <span>{titleEn}</span>
+        </div>
+        <div className="flex gap-2">
+          <Link
+            href={`/dashboard/analytics?campaign=${id}`}
+            className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent"
+          >
+            Analytics
+          </Link>
+          <Link
+            href={`/dashboard/map?campaign=${id}`}
+            className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent"
+          >
+            Geo Map
+          </Link>
+        </div>
       </div>
 
       {/* Header */}
@@ -179,6 +283,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           {actionError}
         </div>
       )}
+
+      {/* Export */}
+      {!isDraft && <ExportPanel campaignId={id} />}
 
       {/* Workflow assignments */}
       <div className="space-y-3">

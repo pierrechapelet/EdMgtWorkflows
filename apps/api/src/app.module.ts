@@ -14,6 +14,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { SubmissionsModule } from './submissions/submissions.module';
 import { ApprovalsModule } from './approvals/approvals.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -62,7 +63,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     // Phase 8: In-app notifications + email (SES)
     NotificationsModule,
 
-    // Phase 9+: GeoModule, ReportsModule (placeholder)
+    // Phase 9: Dashboard analytics, geo map, CSV/XLSX/PDF export
+    ReportsModule,
   ],
 })
 export class AppModule {}
